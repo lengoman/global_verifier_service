@@ -21,7 +21,7 @@ The project is organized into the following modules:
 
 ## Building and Running
 
-### Note: Use the private_key.pem file sent to you in the email
+### Note: Download the public_key and private_key.pem files (sent by email) to the folder global_verifier_service.
 
 ### Run the Holder Client for remote Lambda Testing
 
