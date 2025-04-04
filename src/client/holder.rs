@@ -1,36 +1,126 @@
-use reqwest::Client;
+use reqwest;
 use serde_json::json;
-use std::env;
-
-use global_verifier_service::common::signer::sign_message;
+use global_verifier_service::common::signer::{sign_message, SignedPayload};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Get the service URL from command line arguments or use default
-    let args: Vec<String> = env::args().collect();
-    let service_url = if args.len() > 1 {
-        args[1].clone()
-    } else {
-        "http://localhost:3040/verify".to_string()
-    };
+    // Get the verifier service URL from command line arguments or use default
+    let verifier_url = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "http://localhost:3000/verify".to_string());
 
-    println!("Using verifier service at: {}", service_url);
+    println!("Using verifier service at: {}", verifier_url);
 
-    // Sign the message
-    let signed_payload = sign_message("Hello, World!")?;
+    // Create a payload
+    let message = "Hello, World!";
+    println!("Created message: {}", message);
 
-    // Send to verifier
-    let client = Client::new();
+    // Sign the payload
+    let SignedPayload { payload, signature, nonce } = sign_message(message)?;
+    println!("Generated signature: {}", signature);
+    println!("Generated payload: {}", payload);
+    println!("Generated nonce: {}", nonce);
+
+    // Create the request body
+    let request_body = json!({
+        "payload": payload,
+        "signature": signature,
+        "nonce": nonce
+    });
+
+    println!("Sending request to verifier service...");
+    println!("Request body: {}", request_body);
+
+    // Send the request to the verifier service
+    let client = reqwest::Client::new();
     let response = client
-        .post(&service_url)
-        .json(&json!({
-            "payload": signed_payload.payload,
-            "signature": signed_payload.signature,
-            "nonce": signed_payload.nonce
-        }))
+        .post(&verifier_url)
+        .header("Content-Type", "application/json")
+        .json(&request_body)
         .send()
         .await?;
 
-    println!("Response: {:?}", response.text().await?);
-    Ok(())
+    // Check if the request was successful
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await?;
+        println!("Error: Server returned status {} with body: {}", status, text);
+        return Err(format!("Server returned status {}", status).into());
+    }
+
+    // Get the response text first
+    let response_text = response.text().await?;
+    println!("Raw response: {}", response_text);
+
+    // Try to parse the response as JSON
+    match serde_json::from_str::<serde_json::Value>(&response_text) {
+        Ok(response_body) => {
+            println!("Parsed response: {:?}", response_body);
+            Ok(())
+        },
+        Err(e) => {
+            println!("Error parsing JSON response: {}", e);
+            Err(format!("Failed to parse JSON response: {}", e).into())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use global_verifier_service::test_utils;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+    use uuid::Uuid;
+
+    fn setup_test_environment() -> (String, String) {
+        test_utils::setup_test_environment()
+    }
+
+    #[test]
+    fn test_sign_and_encode() {
+        let (payload, _) = setup_test_environment();
+
+        // Sign the payload
+        let SignedPayload { signature, .. } = sign_message(&payload).unwrap();
+
+        // Verify the signature is not empty
+        assert!(!signature.is_empty());
+
+        // Verify the signature can be decoded
+        let decoded = BASE64.decode(&signature).unwrap();
+        assert!(!decoded.is_empty());
+    }
+
+    #[test]
+    fn test_nonce_generation() {
+        let nonce1 = Uuid::new_v4().to_string();
+        let nonce2 = Uuid::new_v4().to_string();
+
+        // Verify nonces are not empty
+        assert!(!nonce1.is_empty());
+        assert!(!nonce2.is_empty());
+
+        // Verify nonces are different
+        assert_ne!(nonce1, nonce2);
+    }
+
+    #[test]
+    fn test_request_body_creation() {
+        let (payload, _) = setup_test_environment();
+
+        // Sign the payload
+        let SignedPayload { signature, payload, nonce } = sign_message(&payload).unwrap();
+
+        // Create request body
+        let request_body = json!({
+            "payload": payload,
+            "signature": signature,
+            "nonce": nonce
+        });
+
+        // Verify the request body has the required fields
+        assert!(request_body["payload"].as_str().is_some());
+        assert!(request_body["signature"].as_str().is_some());
+        assert!(request_body["nonce"].as_str().is_some());
+    }
 }
