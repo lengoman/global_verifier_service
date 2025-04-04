@@ -72,23 +72,24 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use uuid::Uuid;
 
-    fn setup_test_environment() -> (String, String) {
-        test_utils::setup_test_environment()
+    fn setup_test_environment() -> Result<(String, String), Box<dyn std::error::Error>> {
+        Ok(test_utils::setup_test_environment())
     }
 
     #[test]
-    fn test_sign_and_encode() {
-        let (payload, _) = setup_test_environment();
+    fn test_sign_and_encode() -> Result<(), Box<dyn std::error::Error>> {
+        let (payload, _) = setup_test_environment()?;
 
         // Sign the payload
-        let SignedPayload { signature, .. } = sign_message(&payload).unwrap();
+        let SignedPayload { signature, .. } = sign_message(&payload)?;
 
         // Verify the signature is not empty
         assert!(!signature.is_empty());
 
         // Verify the signature can be decoded
-        let decoded = BASE64.decode(&signature).unwrap();
+        let decoded = BASE64.decode(&signature)?;
         assert!(!decoded.is_empty());
+        Ok(())
     }
 
     #[test]
@@ -105,11 +106,11 @@ mod tests {
     }
 
     #[test]
-    fn test_request_body_creation() {
-        let (payload, _) = setup_test_environment();
+    fn test_request_body_creation() -> Result<(), Box<dyn std::error::Error>> {
+        let (payload, _) = setup_test_environment()?;
 
         // Sign the payload
-        let SignedPayload { signature, payload, nonce } = sign_message(&payload).unwrap();
+        let SignedPayload { signature, payload, nonce } = sign_message(&payload)?;
 
         // Create request body
         let request_body = json!({
@@ -122,5 +123,6 @@ mod tests {
         assert!(request_body["payload"].as_str().is_some());
         assert!(request_body["signature"].as_str().is_some());
         assert!(request_body["nonce"].as_str().is_some());
+        Ok(())
     }
 }

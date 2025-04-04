@@ -38,7 +38,7 @@ async fn handle_request(event: Request, nonce_store: NonceStore) -> Result<Respo
         Ok(Response::builder()
             .status(404)
             .body(Body::from("Not Found"))
-            .unwrap())
+            .map_err(|e| Error::from(format!("Failed to build response: {}", e)))?)
     }
 }
 
@@ -70,7 +70,7 @@ async fn handle_verify_request(event: Request, nonce_store: NonceStore) -> Resul
                     "verified": false,
                     "message": "Nonce already used"
                 }).to_string()))
-                .unwrap());
+                .map_err(|e| Error::from(format!("Failed to build response: {}", e)))?);
         }
         nonces.insert(nonce.to_string());
     }
@@ -85,7 +85,7 @@ async fn handle_verify_request(event: Request, nonce_store: NonceStore) -> Resul
                     "verified": false,
                     "message": "Invalid signature format"
                 }).to_string()))
-                .unwrap());
+                .map_err(|e| Error::from(format!("Failed to build response: {}", e)))?);
         }
     };
 
@@ -97,21 +97,21 @@ async fn handle_verify_request(event: Request, nonce_store: NonceStore) -> Resul
                 "verified": true,
                 "message": "Signature verified successfully"
             }).to_string()))
-            .unwrap()),
+            .map_err(|e| Error::from(format!("Failed to build response: {}", e)))?),
         Ok(false) => Ok(Response::builder()
             .status(200)
             .body(Body::from(json!({
                 "verified": false,
                 "message": "Invalid signature"
             }).to_string()))
-            .unwrap()),
+            .map_err(|e| Error::from(format!("Failed to build response: {}", e)))?),
         Err(_) => Ok(Response::builder()
             .status(500)
             .body(Body::from(json!({
                 "verified": false,
                 "message": "Internal server error"
             }).to_string()))
-            .unwrap()),
+            .map_err(|e| Error::from(format!("Failed to build response: {}", e)))?),
     }
 }
 
@@ -122,34 +122,34 @@ mod tests {
     use wiremock::http::Method;
     use global_verifier_service::test_utils;
 
-    async fn setup_test_request(payload: &str, signature: &str, nonce: &str) -> Request<Body> {
+    async fn setup_test_request(payload: &str, signature: &str, nonce: &str) -> Result<Request<Body>, Error> {
         let body = json!({
             "payload": payload,
             "signature": signature,
             "nonce": nonce
         }).to_string();
 
-        Request::builder()
+        Ok(Request::builder()
             .method(Method::Post)
             .uri("/verify")
             .header("Content-Type", "application/json")
             .body(Body::from(body))
-            .unwrap()
+            .map_err(|e| Error::from(format!("Failed to build request: {}", e)))?)
     }
 
     #[tokio::test]
-    async fn test_handle_verify_request_valid() {
+    async fn test_handle_verify_request_valid() -> Result<(), Box<dyn std::error::Error>> {
         // Create a nonce store
         let nonce_store: NonceStore = Arc::new(Mutex::new(HashSet::new()));
 
         // Create a payload and sign it
-        let (payload, signature_b64, nonce) = test_utils::create_signed_payload("Hello, World!");
+        let (payload, signature_b64, nonce) = test_utils::create_signed_payload("Hello, World!")?;
 
         // Create request
-        let request = setup_test_request(&payload, &signature_b64, &nonce).await;
+        let request = setup_test_request(&payload, &signature_b64, &nonce).await?;
 
         // Handle request
-        let response = handle_verify_request(request, nonce_store).await.unwrap();
+        let response = handle_verify_request(request, nonce_store).await?;
 
         // Check response
         assert_eq!(response.status(), 200);
@@ -158,16 +158,17 @@ mod tests {
         let body_bytes = match body {
             Body::Text(text) => text.into_bytes(),
             Body::Binary(bytes) => bytes,
-            _ => panic!("Unexpected body type"),
+            _ => return Err("Unexpected body type".into()),
         };
-        let response: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&body_bytes)?;
 
-        assert!(response["verified"].as_bool().unwrap());
-        assert_eq!(response["message"].as_str().unwrap(), "Signature verified successfully");
+        assert!(response["verified"].as_bool().ok_or("Missing verified field")?);
+        assert_eq!(response["message"].as_str().ok_or("Missing message field")?, "Signature verified successfully");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_verify_request_invalid_signature() {
+    async fn test_handle_verify_request_invalid_signature() -> Result<(), Box<dyn std::error::Error>> {
         // Create a nonce store
         let nonce_store: NonceStore = Arc::new(Mutex::new(HashSet::new()));
 
@@ -176,10 +177,10 @@ mod tests {
             "Hello, World!",
             &BASE64.encode(vec![0u8; 256]),
             "test-nonce-2"
-        ).await;
+        ).await?;
 
         // Handle request
-        let response = handle_verify_request(request, nonce_store).await.unwrap();
+        let response = handle_verify_request(request, nonce_store).await?;
 
         // Check response
         assert_eq!(response.status(), 200);
@@ -188,16 +189,17 @@ mod tests {
         let body_bytes = match body {
             Body::Text(text) => text.into_bytes(),
             Body::Binary(bytes) => bytes,
-            _ => panic!("Unexpected body type"),
+            _ => return Err("Unexpected body type".into()),
         };
-        let response: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&body_bytes)?;
 
-        assert!(!response["verified"].as_bool().unwrap());
-        assert_eq!(response["message"].as_str().unwrap(), "Invalid signature");
+        assert!(!response["verified"].as_bool().ok_or("Missing verified field")?);
+        assert_eq!(response["message"].as_str().ok_or("Missing message field")?, "Invalid signature");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_verify_request_invalid_base64() {
+    async fn test_handle_verify_request_invalid_base64() -> Result<(), Box<dyn std::error::Error>> {
         // Create a nonce store
         let nonce_store: NonceStore = Arc::new(Mutex::new(HashSet::new()));
 
@@ -206,10 +208,10 @@ mod tests {
             "Hello, World!",
             "invalid-base64",
             "test-nonce-3"
-        ).await;
+        ).await?;
 
         // Handle request
-        let response = handle_verify_request(request, nonce_store).await.unwrap();
+        let response = handle_verify_request(request, nonce_store).await?;
 
         // Check response
         assert_eq!(response.status(), 200);
@@ -218,16 +220,17 @@ mod tests {
         let body_bytes = match body {
             Body::Text(text) => text.into_bytes(),
             Body::Binary(bytes) => bytes,
-            _ => panic!("Unexpected body type"),
+            _ => return Err("Unexpected body type".into()),
         };
-        let response: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        let response: serde_json::Value = serde_json::from_slice(&body_bytes)?;
 
-        assert!(!response["verified"].as_bool().unwrap());
-        assert_eq!(response["message"].as_str().unwrap(), "Invalid signature format");
+        assert!(!response["verified"].as_bool().ok_or("Missing verified field")?);
+        assert_eq!(response["message"].as_str().ok_or("Missing message field")?, "Invalid signature format");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_handle_request_invalid_path() {
+    async fn test_handle_request_invalid_path() -> Result<(), Box<dyn std::error::Error>> {
         // Create a nonce store
         let nonce_store: NonceStore = Arc::new(Mutex::new(HashSet::new()));
 
@@ -236,12 +239,13 @@ mod tests {
             .method(Method::Post)
             .uri("/invalid")
             .body(Body::from(""))
-            .unwrap();
+            .map_err(|e| Error::from(format!("Failed to build request: {}", e)))?;
 
         // Handle request
-        let response = handle_request(request, nonce_store).await.unwrap();
+        let response = handle_request(request, nonce_store).await?;
 
         // Check response
         assert_eq!(response.status(), 404);
+        Ok(())
     }
 }

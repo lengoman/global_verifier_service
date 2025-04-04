@@ -100,11 +100,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_valid_signature() {
+    async fn test_verify_valid_signature() -> Result<(), Box<dyn std::error::Error>> {
         let app = setup_test_router().await;
 
         // Create a signed payload
-        let (payload, signature_b64, nonce) = test_utils::create_signed_payload("Hello, World!");
+        let (payload, signature_b64, nonce) = test_utils::create_signed_payload("Hello, World!")?;
 
         // Create request
         let request = VerifyRequest {
@@ -120,23 +120,24 @@ mod tests {
                     .method("POST")
                     .uri("/verify")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_string(&request).unwrap()))
-                    .unwrap(),
+                    .body(Body::from(serde_json::to_string(&request)?))
+                    .map_err(|e| format!("Failed to build request: {}", e))?,
             )
             .await
-            .unwrap();
+            .map_err(|e| format!("Failed to send request: {}", e))?;
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let response: VerifyResponse = serde_json::from_slice(&body)?;
 
         assert!(response.verified);
         assert_eq!(response.message, "Signature verified successfully");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_verify_invalid_signature() {
+    async fn test_verify_invalid_signature() -> Result<(), Box<dyn std::error::Error>> {
         let app = setup_test_router().await;
 
         // Create request with invalid signature
@@ -153,27 +154,28 @@ mod tests {
                     .method("POST")
                     .uri("/verify")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_string(&request).unwrap()))
-                    .unwrap(),
+                    .body(Body::from(serde_json::to_string(&request)?))
+                    .map_err(|e| format!("Failed to build request: {}", e))?,
             )
             .await
-            .unwrap();
+            .map_err(|e| format!("Failed to send request: {}", e))?;
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        let response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await?;
+        let response: VerifyResponse = serde_json::from_slice(&body)?;
 
         assert!(!response.verified);
         assert_eq!(response.message, "Invalid signature");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_verify_duplicate_nonce() {
+    async fn test_verify_duplicate_nonce() -> Result<(), Box<dyn std::error::Error>> {
         let app = setup_test_router().await;
 
         // Create a signed payload
-        let (payload, signature_b64, nonce) = test_utils::create_signed_payload("Hello, World!");
+        let (payload, signature_b64, nonce) = test_utils::create_signed_payload("Hello, World!")?;
 
         // Create request
         let request = VerifyRequest {
@@ -190,11 +192,11 @@ mod tests {
                     .method("POST")
                     .uri("/verify")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_string(&request).unwrap()))
-                    .unwrap(),
+                    .body(Body::from(serde_json::to_string(&request)?))
+                    .map_err(|e| format!("Failed to build request: {}", e))?,
             )
             .await
-            .unwrap();
+            .map_err(|e| format!("Failed to send request: {}", e))?;
 
         let response2 = app
             .oneshot(
@@ -202,29 +204,30 @@ mod tests {
                     .method("POST")
                     .uri("/verify")
                     .header("Content-Type", "application/json")
-                    .body(Body::from(serde_json::to_string(&request).unwrap()))
-                    .unwrap(),
+                    .body(Body::from(serde_json::to_string(&request)?))
+                    .map_err(|e| format!("Failed to build request: {}", e))?,
             )
             .await
-            .unwrap();
+            .map_err(|e| format!("Failed to send request: {}", e))?;
 
         assert_eq!(response1.status(), StatusCode::OK);
         assert_eq!(response2.status(), StatusCode::OK);
 
-        let body1 = to_bytes(response1.into_body(), usize::MAX).await.unwrap();
-        let body2 = to_bytes(response2.into_body(), usize::MAX).await.unwrap();
+        let body1 = to_bytes(response1.into_body(), usize::MAX).await?;
+        let body2 = to_bytes(response2.into_body(), usize::MAX).await?;
 
-        let response1: VerifyResponse = serde_json::from_slice(&body1).unwrap();
-        let response2: VerifyResponse = serde_json::from_slice(&body2).unwrap();
+        let response1: VerifyResponse = serde_json::from_slice(&body1)?;
+        let response2: VerifyResponse = serde_json::from_slice(&body2)?;
 
         assert!(response1.verified);
         assert!(!response2.verified);
         assert_eq!(response2.message, "Nonce already used");
+        Ok(())
     }
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create the router
     let app = create_router();
 
@@ -233,5 +236,7 @@ async fn main() {
     println!("Verifier service listening on {}", addr);
 
     // Run the server
-    axum::serve(tokio::net::TcpListener::bind(addr).await.unwrap(), app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }

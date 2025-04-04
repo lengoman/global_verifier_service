@@ -18,16 +18,16 @@ pub fn setup_test_environment() -> (String, String) {
 }
 
 /// Creates a signed payload for testing
-pub fn create_signed_payload(message: &str) -> (String, String, String) {
+pub fn create_signed_payload(message: &str) -> Result<(String, String, String), Box<dyn std::error::Error>> {
     // Sign the message
-    let SignedPayload { payload, signature, nonce } = sign_message(message).unwrap();
+    let SignedPayload { payload, signature, nonce } = sign_message(message)?;
     let signature_b64 = signature;
     
-    (payload, signature_b64, nonce)
+    Ok((payload, signature_b64, nonce))
 }
 
 /// Verifies that a signature is valid for a payload
-pub fn verify_signature_valid(payload: &str, signature_b64: &str) -> bool {
-    let signature = BASE64.decode(signature_b64).unwrap();
-    crate::common::verify::verify_signature(payload, &signature).unwrap()
+pub fn verify_signature_valid(payload: &str, signature_b64: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    let signature = BASE64.decode(signature_b64)?;
+    Ok(crate::common::verify::verify_signature(payload, &signature)?)
 } 
